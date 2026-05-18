@@ -20,6 +20,13 @@ interface OrgProfile {
   notif_new_apps: boolean;
   notif_deadlines: boolean;
   notif_acceptances: boolean;
+  is_verified: boolean;
+  onboarding_completed: boolean;
+  cac_url: string | null;
+  cac_number: string | null;
+  phone: string | null;
+  address: string | null;
+  rejection_reason: string | null;
 }
 
 interface AuthContextType {

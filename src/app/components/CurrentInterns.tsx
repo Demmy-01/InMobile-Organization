@@ -197,7 +197,11 @@ export function CurrentInterns() {
                       {intern.internship_listings?.deadline ? "Days Left" : ""}
                     </p>
                     <p className="text-xs sm:text-sm font-semibold" style={{ color: "#0d1b3e" }}>
-                      {intern.internship_listings?.deadline ? getDaysLeft(intern.internship_listings.deadline) : "—"}
+                      {intern.status === "Completed"
+                        ? 0
+                        : intern.internship_listings?.deadline
+                        ? getDaysLeft(intern.internship_listings.deadline)
+                        : "—"}
                     </p>
                   </div>
                 </div>

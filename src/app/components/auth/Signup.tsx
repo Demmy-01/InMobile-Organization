@@ -55,6 +55,19 @@ export function Signup() {
     setError("");
     setLoading(true);
     try {
+      // Block student accounts from registering as organisations
+      const { data: studentProfile } = await supabase
+        .from('student_profiles')
+        .select('id')
+        .eq('email', form.email)
+        .maybeSingle();
+
+      if (studentProfile) {
+        setError('This email is already registered as a Student account. Please use the InternLink mobile app.');
+        setLoading(false);
+        return;
+      }
+
       const { data, error: signUpError } = await supabase.auth.signUp({
         email: form.email,
         password: form.password,

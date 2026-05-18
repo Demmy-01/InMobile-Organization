@@ -10,6 +10,7 @@ import { Login } from "./components/auth/Login";
 import { Signup } from "./components/auth/Signup";
 import { ConfirmOtp } from "./components/auth/ConfirmOtp";
 import { ForgotPassword } from "./components/auth/ForgotPassword";
+import { ResetPassword } from "./components/auth/ResetPassword";
 
 export const router = createBrowserRouter([
   // Public auth routes
@@ -17,6 +18,7 @@ export const router = createBrowserRouter([
   { path: "/signup", Component: Signup },
   { path: "/confirm-otp", Component: ConfirmOtp },
   { path: "/forgot-password", Component: ForgotPassword },
+  { path: "/reset-password", Component: ResetPassword },
 
   // Protected routes (require login)
   {

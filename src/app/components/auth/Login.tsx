@@ -16,6 +16,19 @@ export function Login() {
     setError("");
     setLoading(true);
     try {
+      // Block student accounts from signing in as organisations
+      const { data: studentProfile } = await supabase
+        .from('student_profiles')
+        .select('id')
+        .eq('email', email)
+        .maybeSingle();
+
+      if (studentProfile) {
+        setError('This email is registered as a Student account. Please use the InternLink mobile app to sign in.');
+        setLoading(false);
+        return;
+      }
+
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
       navigate("/");
