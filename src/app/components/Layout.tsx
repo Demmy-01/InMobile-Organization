@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Outlet, Link, useLocation, useNavigate } from "react-router";
 import {
   LayoutDashboard,
@@ -16,10 +16,21 @@ import {
   X,
   LogOut,
   Megaphone,
+  TrendingUp,
 } from "lucide-react";
 import { PostListingModal } from "./PostListingModal";
 import { useAuth } from "../../lib/auth-context";
 import { supabase } from "../../lib/supabase";
+
+interface OrgNotification {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  listing_id: string | null;
+  read: boolean;
+  created_at: string;
+}
 
 const PAGE_TITLES: Record<string, { title: string; crumb: string }> = {
   "/": { title: "Dashboard", crumb: "Dashboard" },
@@ -91,21 +102,25 @@ export interface Announcement {
 export function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { orgProfile, signOut } = useAuth();
+  const { user, orgProfile, signOut } = useAuth();
   const [showPostModal, setShowPostModal] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showBellDropdown, setShowBellDropdown] = useState(false);
 
-  // Announcements
+  // Admin announcements
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(getDismissedIds());
   const [readIds, setReadIds] = useState<Set<string>>(getReadIds());
 
+  // Org-specific in-app notifications (application milestones)
+  const [orgNotifs, setOrgNotifs] = useState<OrgNotification[]>([]);
+
   const activeBanners = announcements.filter(a => !dismissedIds.has(a.id));
   const dismissedAnnouncements = announcements.filter(a => dismissedIds.has(a.id));
-  // Badge = dismissed but not yet marked as read
-  const unreadCount = dismissedAnnouncements.filter(a => !readIds.has(a.id)).length;
+  // Badge = dismissed announcements not read + unread org notifications
+  const unreadOrgNotifs = orgNotifs.filter(n => !n.read).length;
+  const unreadCount = dismissedAnnouncements.filter(a => !readIds.has(a.id)).length + unreadOrgNotifs;
 
   const markAsRead = (id: string) => {
     const next = new Set(readIds).add(id);
@@ -118,6 +133,33 @@ export function Layout() {
     dismissedAnnouncements.forEach(a => next.add(a.id));
     setReadIds(next);
     saveReadIds(next);
+  };
+
+  const fetchOrgNotifs = useCallback(async () => {
+    if (!user) return;
+    try {
+      const { data } = await supabase
+        .from("org_notifications")
+        .select("id, type, title, body, listing_id, read, created_at")
+        .eq("org_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      if (data) setOrgNotifs(data as OrgNotification[]);
+    } catch {
+      // table may not exist yet — silently ignore
+    }
+  }, [user]);
+
+  const markOrgNotifRead = async (id: string) => {
+    setOrgNotifs(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    await supabase.from("org_notifications").update({ read: true }).eq("id", id);
+  };
+
+  const markAllOrgNotifsRead = async () => {
+    const unreadIds = orgNotifs.filter(n => !n.read).map(n => n.id);
+    if (unreadIds.length === 0) return;
+    setOrgNotifs(prev => prev.map(n => ({ ...n, read: true })));
+    await supabase.from("org_notifications").update({ read: true }).in("id", unreadIds);
   };
 
   useEffect(() => {
@@ -134,7 +176,22 @@ export function Layout() {
         // table may not exist yet
       }
     })();
-  }, []);
+
+    fetchOrgNotifs();
+
+    if (!user) return;
+    // Realtime: refresh org_notifications when new rows arrive
+    const channel = supabase
+      .channel("org-notifs-layout")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "org_notifications", filter: `org_id=eq.${user.id}` },
+        () => fetchOrgNotifs()
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [user, fetchOrgNotifs]);
 
   const dismissAnnouncement = (id: string) => {
     const next = new Set(dismissedIds).add(id);
@@ -404,7 +461,7 @@ export function Layout() {
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         {unreadCount > 0 && (
                           <button
-                            onClick={markAllAsRead}
+                            onClick={() => { markAllAsRead(); markAllOrgNotifsRead(); }}
                             style={{ background: "rgba(26,175,107,0.15)", border: "1px solid rgba(26,175,107,0.3)", borderRadius: 6, cursor: "pointer", color: "#1aaf6b", fontSize: 11, fontWeight: 700, padding: "3px 8px" }}
                           >
                             Mark all as read
@@ -416,13 +473,38 @@ export function Layout() {
                       </div>
                     </div>
 
-                    {dismissedAnnouncements.length === 0 ? (
+                    {dismissedAnnouncements.length === 0 && orgNotifs.length === 0 ? (
                       <div style={{ padding: "28px 16px", textAlign: "center" }}>
                         <Bell style={{ width: 28, height: 28, color: "rgba(255,255,255,0.2)", margin: "0 auto 10px" }} />
                         <p style={{ color: "rgba(255,255,255,0.35)", fontSize: 13 }}>No notifications yet</p>
                       </div>
                     ) : (
                       <div style={{ maxHeight: 360, overflowY: "auto" }}>
+                        {/* ── Application milestone notifications ── */}
+                        {orgNotifs.map(n => (
+                          <div key={n.id} className="bell-item" style={{ background: n.read ? "transparent" : "rgba(59,107,212,0.07)" }}>
+                            <div style={{ width: 32, height: 32, borderRadius: "50%", background: n.read ? "rgba(255,255,255,0.06)" : "rgba(59,107,212,0.2)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                              <TrendingUp style={{ width: 15, height: 15, color: n.read ? "rgba(255,255,255,0.3)" : "#93c5fd" }} />
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <p style={{ color: n.read ? "rgba(255,255,255,0.5)" : "#fff", fontSize: 13, fontWeight: n.read ? 400 : 600, marginBottom: 2 }}>{n.title}</p>
+                              <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 12, lineHeight: 1.5, marginBottom: 4 }}>{n.body}</p>
+                              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                                <p style={{ color: "rgba(255,255,255,0.25)", fontSize: 11 }}>{timeAgo(n.created_at)} · Application Alert</p>
+                                {!n.read && (
+                                  <button
+                                    onClick={() => markOrgNotifRead(n.id)}
+                                    style={{ background: "none", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 4, cursor: "pointer", color: "rgba(255,255,255,0.5)", fontSize: 10, fontWeight: 600, padding: "2px 7px", whiteSpace: "nowrap", flexShrink: 0 }}
+                                  >
+                                    Mark as read
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+
+                        {/* ── Admin announcements (dismissed ones) ── */}
                         {dismissedAnnouncements.map(a => {
                           const isRead = readIds.has(a.id);
                           return (
